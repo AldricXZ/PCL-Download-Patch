@@ -14,7 +14,7 @@ try {
 
     function Get-ExeHash { (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash }
     $last = ''
-    if (Test-Path $hashFile) { $last = (Get-Content $hashFile -TotalCount 1 -Encoding Unicode).Trim() }
+    if (Test-Path $hashFile) { $last = (Get-Content $hashFile -TotalCount 1 -Encoding ascii).Trim() }
     $cur = Get-ExeHash
     if ($last -ieq $cur) { return }   # 已是修复后的版本
 

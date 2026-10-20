@@ -1,7 +1,8 @@
 ﻿param(
     [string]$ExePath = '',
     [switch]$Backup,
-    [string]$PatchSet = 'ABCD'
+    [string]$PatchSet = 'ABCD',
+    [string]$AutoFix = 'watch'
 )
 $ErrorActionPreference = 'Stop'
 $script:here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -9,12 +10,17 @@ $script:here = Split-Path -Parent $MyInvocation.MyCommand.Path
 function Write-Log($msg) { Write-Output $msg }
 function Fail($msg) { Write-Output "[失败] $msg"; exit 1 }
 
+if ($AutoFix -notin @('watch', 'shell', 'none')) { Fail "AutoFix 参数无效：$AutoFix（应为 watch / shell / none）" }
+
 if ([string]::IsNullOrEmpty($ExePath)) {
     Write-Log "==== PCL 下载功能补丁 ===="
     Write-Log "补丁作者：沐序  https://github.com/AldricXZ/PCL-Download-Patch"
     Write-Log ""
-    Write-Log "用法：把启动器的 Plain Craft Launcher 2.exe 拖到「拖我上去.bat」图标上松手即可。"
-    Write-Log "      想保留一份补丁前的备份文件，改用「拖我上去_备份版.bat」（建议）。"
+    Write-Log "用法：把启动器的 Plain Craft Launcher 2.exe 拖到「拖我上去.bat」图标上松手，按菜单选择即可。"
+    Write-Log "      菜单可选是否生成补丁前备份（建议），以及更新后的自动修复方式："
+    Write-Log "        1) 不自动修复 —— 每次更新后把新 exe 再拖一次"
+    Write-Log "        2) 启动壳检测 —— 用补丁包里的「启动游戏.vbs」启动游戏，启动前自动修复（无后台）"
+    Write-Log "        3) 常驻守护（推荐）—— 开机自启后台守护，打开启动器时检测，关闭后自动修复"
     Write-Log ""
     Write-Log "谁需要打补丁（补丁器也会自动判断）："
     Write-Log "  - 快照版（赞助版）：需要。请先用你自己的赞助账号从爱发电下载快照版。"
@@ -22,7 +28,7 @@ if ([string]::IsNullOrEmpty($ExePath)) {
     Write-Log "  - 旧版正式版（如 2.13.1.1）：没有限制，直接用，无需补丁。"
     Write-Log ""
     Write-Log "补丁只修改启动器文件本身，不动 .minecraft、设置和存档。"
-    Write-Log "默认不生成备份文件；补丁失败时原文件不会被改动。"
+    Write-Log "是否生成备份、采用哪种自动修复方式，都由拖放后的菜单选择；补丁失败时原文件不会被改动。"
     exit 0
 }
 
@@ -39,7 +45,8 @@ Add-Type -Path $cecilPath
 # ---------- 备份 ----------
 $srcPath = $ExePath
 $backupPath = $ExePath -replace '\.exe$', '_补丁前备份.exe'
-Write-Log ("[模式] " + $(if ($Backup) { '保留补丁前备份（建议）' } else { '不生成备份文件' }))
+$afNames = @{ watch = '常驻守护（推荐）'; shell = '启动壳检测'; none = '不自动修复' }
+Write-Log ("[模式] " + $(if ($Backup) { '保留补丁前备份（建议）' } else { '不生成备份文件' }) + " | 更新自动修复：" + $afNames[$AutoFix])
 
 # ---------- 读取内嵌依赖（供 Cecil 解析引用） ----------
 $depsDir = Join-Path $env:TEMP ("PCLPatchDeps_" + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -513,21 +520,46 @@ Write-Log "已写回：$srcPath"
 if (-not $Backup) { Write-Log "（本次未创建备份；如需备份，使用「拖我上去_备份版.bat」重新处理）" }
 Write-Log "完成！重新启动启动器即可生效。"
 
-# ---------- 更新自动修复守护：记住 exe 路径 + 开机自启常驻守护（原快捷方式保持不变） ----------
+# ---------- 收尾：记录状态 + 按所选方式设置更新自动修复 ----------
 try {
     Set-Content -Path (Join-Path $here 'wrapper-path.txt') -Value $srcPath -Encoding Unicode
-    $vbs = Join-Path $here 'Watch-PCL.vbs'
-    if (Test-Path $vbs) {
-        $startup = [Environment]::GetFolderPath('Startup')
-        $startupVbs = Join-Path $startup 'PCL自动修复.vbs'
-        $loader = 'CreateObject("Wscript.Shell").Run "wscript.exe ""' + $vbs + '""", 0, False'
-        Set-Content -Path $startupVbs -Value $loader -Encoding ascii
-        Write-Log "已设置开机自动守护（Startup\PCL自动修复.vbs，后台常驻约 15MB，无窗口）："
-        Write-Log "  - 每次打开启动器的瞬间都会检查，发现更新弹一次提示；"
-        Write-Log "  - 关闭启动器后几秒内自动完成修复，下次打开即恢复，全程无需操作。"
-        Write-Log "  - 原桌面快捷方式保持不变，直接双击启动即可。移除守护：删除 Startup 文件夹里的 PCL自动修复.vbs。"
-    }
     Set-Content -Path (Join-Path $here '.lastpatched.sha256') -Value (Get-FileHash -Algorithm SHA256 -LiteralPath $srcPath).Hash -Encoding ascii
+    $startup = [Environment]::GetFolderPath('Startup')
+    $startupVbs = Join-Path $startup 'PCL自动修复.vbs'
+    $shellVbs = Join-Path $here '启动游戏.vbs'
+    if ($AutoFix -eq 'watch') {
+        $vbs = Join-Path $here 'Watch-PCL.vbs'
+        if (Test-Path $vbs) {
+            $loader = 'CreateObject("Wscript.Shell").Run "wscript.exe ""' + $vbs + '""", 0, False'
+            Set-Content -Path $startupVbs -Value $loader -Encoding ascii
+            Write-Log "已设置常驻守护（Startup\PCL自动修复.vbs 开机自启，后台约 15MB，无窗口）："
+            Write-Log "  - 每次打开启动器的瞬间都会检查，发现更新弹一次提示；"
+            Write-Log "  - 关闭启动器后几秒内自动完成修复，下次打开即恢复，全程无需操作。"
+            Write-Log "  - 桌面快捷方式保持不变，直接双击启动即可。移除守护：删除 Startup 文件夹里的 PCL自动修复.vbs。"
+        }
+    } else {
+        # 启动壳 / 不自动修复：移除常驻守护（开机自启文件 + 正在运行的守护进程）
+        $hadStartup = Test-Path $startupVbs
+        $killed = 0
+        try {
+            Get-CimInstance Win32_Process -Filter "Name='wscript.exe'" | ForEach-Object {
+                if ($_.CommandLine -match 'Watch-PCL\.vbs') {
+                    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+                    $killed++
+                }
+            }
+        } catch { }
+        if ($hadStartup) { Remove-Item $startupVbs -Force -ErrorAction SilentlyContinue }
+        if ($killed -gt 0 -or $hadStartup) { Write-Log "已移除之前的常驻守护（已在运行的守护进程随之退出）。" }
+        if ($AutoFix -eq 'shell') {
+            Write-Log "已切换为启动壳检测（无后台常驻）："
+            Write-Log "  - 以后请用本补丁包里的「启动游戏.vbs」启动游戏：启动前会自动检测更新并修复。"
+            Write-Log "  - 也可以右键「启动游戏.vbs」发送到桌面，代替原快捷方式。"
+        } else {
+            if (Test-Path $shellVbs) { Remove-Item $shellVbs -Force -ErrorAction SilentlyContinue }
+            Write-Log "未安装任何自动修复：以后启动器更新后，把新 exe 再拖到「拖我上去.bat」打一次即可。"
+        }
+    }
 } catch {
-    Write-Log "[提示] 自动修复守护设置失败（不影响补丁结果）：$($_.Exception.Message)"
+    Write-Log "[提示] 自动修复方式设置失败（不影响补丁结果）：$($_.Exception.Message)"
 }

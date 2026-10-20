@@ -1,2 +1,6 @@
 *.log
 .mimosa/
+.lastpatched.sha256
+wrapper-path.txt
+.watch.lock
+.notified_*.flag
