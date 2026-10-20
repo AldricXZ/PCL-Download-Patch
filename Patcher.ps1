@@ -512,3 +512,22 @@ Write-Log "=================================================="
 Write-Log "已写回：$srcPath"
 if (-not $Backup) { Write-Log "（本次未创建备份；如需备份，使用「拖我上去_备份版.bat」重新处理）" }
 Write-Log "完成！重新启动启动器即可生效。"
+
+# ---------- 更新自动修复守护：记住 exe 路径 + 开机自启常驻守护（原快捷方式保持不变） ----------
+try {
+    Set-Content -Path (Join-Path $here 'wrapper-path.txt') -Value $srcPath -Encoding Unicode
+    $vbs = Join-Path $here 'Watch-PCL.vbs'
+    if (Test-Path $vbs) {
+        $startup = [Environment]::GetFolderPath('Startup')
+        $startupVbs = Join-Path $startup 'PCL自动修复.vbs'
+        $loader = 'CreateObject("Wscript.Shell").Run "wscript.exe ""' + $vbs + '""", 0, False'
+        Set-Content -Path $startupVbs -Value $loader -Encoding ascii
+        Write-Log "已设置开机自动守护（Startup\PCL自动修复.vbs，后台常驻约 15MB，无窗口）："
+        Write-Log "  - 每次打开启动器的瞬间都会检查，发现更新弹一次提示；"
+        Write-Log "  - 关闭启动器后几秒内自动完成修复，下次打开即恢复，全程无需操作。"
+        Write-Log "  - 原桌面快捷方式保持不变，直接双击启动即可。移除守护：删除 Startup 文件夹里的 PCL自动修复.vbs。"
+    }
+    Set-Content -Path (Join-Path $here '.lastpatched.sha256') -Value (Get-FileHash -Algorithm SHA256 -LiteralPath $srcPath).Hash -Encoding ascii
+} catch {
+    Write-Log "[提示] 自动修复守护设置失败（不影响补丁结果）：$($_.Exception.Message)"
+}
