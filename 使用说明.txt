@@ -33,7 +33,7 @@
       尤其是快照版，官方明确要求仅限赞助者自己使用，请勿转发文件。
 
 五、署名与许可
-    补丁作者：沐序  https://github.com/AldricXZ
+    补丁作者：沐序  https://github.com/AldricXZ/PCL-Download-Patch
     启动器原作者：龙腾猫跃 LTCat（PCL 官方发布：meloong.com/pcl）
     本工具为第三方基于 PCL 的独立二次创作产物，仅供个人自用，
     与 PCL 官方无关联。补丁脚本以 MIT 许可提供；

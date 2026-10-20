@@ -7,7 +7,7 @@
 
 ## 署名
 
-- **补丁作者**：沐序 · [GitHub @AldricXZ](https://github.com/AldricXZ)
+- **补丁作者**：沐序 · [本项目仓库](https://github.com/AldricXZ/PCL-Download-Patch)
 - **启动器原作者**：龙腾猫跃 LTCat · [爱发电](https://meloong.com/afd/a/LTCat)
 - **PCL 官方发布页**：[meloong.com/pcl](https://meloong.com/pcl)
 

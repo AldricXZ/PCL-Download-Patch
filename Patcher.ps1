@@ -11,7 +11,7 @@ function Fail($msg) { Write-Output "[失败] $msg"; exit 1 }
 
 if ([string]::IsNullOrEmpty($ExePath)) {
     Write-Log "==== PCL 下载功能补丁 ===="
-    Write-Log "补丁作者：沐序  https://github.com/AldricXZ"
+    Write-Log "补丁作者：沐序  https://github.com/AldricXZ/PCL-Download-Patch"
     Write-Log ""
     Write-Log "用法：把启动器的 Plain Craft Launcher 2.exe 拖到「拖我上去.bat」图标上松手即可。"
     Write-Log "      想保留一份补丁前的备份文件，改用「拖我上去_备份版.bat」（建议）。"
