@@ -1,0 +1,11 @@
+Mono.Cecil (本目录 cecil\ 下的 Mono.Cecil.dll)
+
+MIT License
+
+Copyright (c) 2008 - 2025 Jb Evain, Mono Project contributors
+
+特此免费授予任何获得本软件副本的人使用、复制、修改、合并、出版、分发、
+再许可和/或销售本软件副本的权利，但须在所有副本中包含上述版权声明和本
+许可声明。
+
+本软件按"原样"提供，不附带任何明示或默示的保证。
