@@ -1,7 +1,11 @@
-﻿param(
+﻿# 补丁器内部辅助函数为脚本私有，命名按职责语义（非导出 cmdlet）
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = '脚本内部辅助函数，调用点已做显式确认')]
+param(
     [string]$ExePath = '',
     [string]$PatchSet = 'ABCD',
-    [string]$AutoFix = 'watch'
+    [string]$AutoFix = 'watch',
+    [switch]$Uninstall,
+    [switch]$Status
 )
 $ErrorActionPreference = 'Stop'
 $script:here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -10,6 +14,107 @@ function Write-Log($msg) { Write-Output $msg }
 function Fail($msg) { Write-Output "[失败] $msg"; exit 1 }
 
 if ($AutoFix -notin @('watch', 'shell', 'none')) { Fail "AutoFix 参数无效：$AutoFix（应为 watch / shell / none）" }
+
+# ---------- 原始备份目录（用于卸载） ----------
+$pristineDir = Join-Path $here '_原始备份'
+$pristineExe = Join-Path $pristineDir 'Plain Craft Launcher 2.exe'
+
+function Get-PristineState {
+    if (Test-Path -LiteralPath $pristineExe) { return 'available' }
+    return 'missing'
+}
+
+function Remove-Daemon {
+    # 移除常驻守护：Startup 自启文件 + 运行中的 wscript
+    $removed = 0
+    $startup = [Environment]::GetFolderPath('Startup')
+    $startupVbs = Join-Path $startup 'PCL自动修复.vbs'
+    if (Test-Path -LiteralPath $startupVbs) {
+        Remove-Item -LiteralPath $startupVbs -Force -ErrorAction SilentlyContinue
+        $removed++
+    }
+    try {
+        Get-CimInstance Win32_Process -Filter "Name='wscript.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($_.CommandLine -match 'Watch-PCL\.vbs') {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+                $removed++
+            }
+        }
+    } catch {
+        Write-Verbose ("结束守护进程失败：" + $_.Exception.Message)
+    }
+    return $removed
+}
+
+function Remove-RuntimeState {
+    # 清理补丁包内的运行时状态文件
+    foreach ($n in @('.lastpatched.sha256', 'wrapper-path.txt', '.watch.lock', 'watcher.log')) {
+        $p = Join-Path $here $n
+        if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
+    }
+    Get-ChildItem -LiteralPath $here -Filter '.notified_*.flag' -File -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+}
+
+# ---------- 状态查询模式（供 GUI 使用，输出 JSON） ----------
+if ($Status) {
+    $pathFile = Join-Path $here 'wrapper-path.txt'
+    $knownExe = ''
+    if (Test-Path -LiteralPath $pathFile) {
+        $knownExe = (Get-Content -LiteralPath $pathFile -TotalCount 1 -Encoding Unicode).Trim()
+    }
+    $startup = [Environment]::GetFolderPath('Startup')
+    $hasDaemonFile = Test-Path -LiteralPath (Join-Path $startup 'PCL自动修复.vbs')
+    $daemonRunning = $false
+    try {
+        $daemonRunning = @(Get-CimInstance Win32_Process -Filter "Name='wscript.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -match 'Watch-PCL\.vbs' }).Count -gt 0
+    } catch {
+        Write-Verbose ("查询守护进程失败：" + $_.Exception.Message)
+    }
+    $obj = [ordered]@{
+        PristineAvailable = ((Get-PristineState) -eq 'available')
+        PristinePath      = $pristineExe
+        PristineSize      = if (Test-Path -LiteralPath $pristineExe) { (Get-Item -LiteralPath $pristineExe).Length } else { 0 }
+        KnownExe          = $knownExe
+        KnownExeExists    = (-not [string]::IsNullOrEmpty($knownExe)) -and (Test-Path -LiteralPath $knownExe)
+        DaemonInstalled   = $hasDaemonFile
+        DaemonRunning     = $daemonRunning
+        Version           = '1.0.5'
+    }
+    $obj | ConvertTo-Json -Compress
+    exit 0
+}
+
+# ---------- 卸载模式 ----------
+if ($Uninstall) {
+    Write-Log "==== PCL 下载功能补丁 · 卸载 ===="
+    if ((Get-PristineState) -ne 'available') {
+        Write-Log "[失败] 未找到原始备份：$pristineExe"
+        Write-Log "       无法自动卸载。请从官方渠道重新下载启动器覆盖。"
+        exit 2
+    }
+    if ([string]::IsNullOrEmpty($ExePath)) {
+        $pathFile = Join-Path $here 'wrapper-path.txt'
+        if (Test-Path -LiteralPath $pathFile) {
+            $ExePath = (Get-Content -LiteralPath $pathFile -TotalCount 1 -Encoding Unicode).Trim()
+        }
+    }
+    if ([string]::IsNullOrEmpty($ExePath) -or -not (Test-Path -LiteralPath $ExePath)) {
+        Fail "找不到要还原的启动器，请指定 exe 路径。"
+    }
+    if (Get-Process -Name 'Plain Craft Launcher 2' -ErrorAction SilentlyContinue) {
+        Fail "启动器正在运行，请先完全关闭再卸载。"
+    }
+    Copy-Item -LiteralPath $pristineExe -Destination $ExePath -Force
+    $n = Remove-Daemon
+    Remove-RuntimeState
+    Write-Log "已还原启动器：$ExePath"
+    if ($n -gt 0) { Write-Log "已移除常驻守护（$n 项）。" }
+    Write-Log "已清理开机自启与运行时状态文件。"
+    Write-Log "卸载完成。原始备份仍保留在补丁包内，如需释放空间可手动删除「_原始备份」文件夹。"
+    exit 0
+}
 
 if ([string]::IsNullOrEmpty($ExePath)) {
     Write-Log "==== PCL 下载功能补丁 ===="
@@ -488,6 +593,21 @@ if ($m0 -and $m0.HasBody) {
     }
 }
 $results.Add("本地安装整合包入口恢复: " + $(if ($doneD) { '成功' } else { $skipD })) | Out-Null
+}
+
+# ---------- 静默留底：首次补丁前保存原始 exe（供卸载还原） ----------
+if (-not (Test-Path -LiteralPath $pristineExe)) {
+    try {
+        if (-not (Test-Path -LiteralPath $pristineDir)) {
+            New-Item -ItemType Directory -Force -Path $pristineDir | Out-Null
+        }
+        Copy-Item -LiteralPath $srcPath -Destination $pristineExe -Force
+        Write-Log "[留底] 已保存原始启动器到补丁包内（供卸载还原，约 6MB）"
+    } catch {
+        Write-Log ("[提示] 原始启动器留底失败（不影响补丁结果）：" + $_.Exception.Message)
+    }
+} else {
+    Write-Verbose "原始备份已存在，保留最早的那一份。"
 }
 
 # ---------- 写出 ----------
