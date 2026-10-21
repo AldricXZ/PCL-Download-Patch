@@ -10,6 +10,25 @@ param()
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 
+# ---- DPI 感知：必须在创建任何窗口前声明，否则高缩放下整窗被位图放大导致文字发虚 ----
+try {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class DpiHelper {
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int value);
+    public static void Enable() {
+        try { SetProcessDpiAwareness(2); }   // PROCESS_PER_MONITOR_DPI_AWARE
+        catch { SetProcessDPIAware(); }      // 回退到系统级 DPI 感知
+    }
+}
+'@ -ErrorAction Stop
+    [DpiHelper]::Enable()
+} catch {
+    Write-Verbose ("DPI 感知设置失败：" + $_.Exception.Message)
+}
+
 $script:here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:patcher = Join-Path $script:here 'Patcher.ps1'
 $script:busy = $false
@@ -55,7 +74,7 @@ $F_Small = New-Object Drawing.Font('Microsoft YaHei UI', 8)
 $form = New-Object Windows.Forms.Form
 $form.Text = 'PCL 下载补丁'
 $form.AutoScaleMode = [Windows.Forms.AutoScaleMode]::Dpi
-$form.ClientSize = New-Object Drawing.Size(900, 640)
+$form.ClientSize = New-Object Drawing.Size(900, 670)
 $form.MinimumSize = New-Object Drawing.Size(760, 560)
 $form.StartPosition = 'CenterScreen'
 $form.BackColor = $C_Bg
@@ -101,7 +120,7 @@ $lblSub.Location = New-Object Drawing.Point(102, 52)
 # ============================ 主卡片 ============================
 $card = New-Object PclPatchUi.RoundPanel
 $card.Location = New-Object Drawing.Point(32, 92)
-$card.Size = New-Object Drawing.Size(836, 272)
+$card.Size = New-Object Drawing.Size(836, 292)
 $card.Anchor = 'Top,Left,Right'
 $card.CornerRadius = 14
 $card.FillColor = $C_Card
@@ -143,37 +162,61 @@ $lblMode.AutoSize = $true
 $lblMode.BackColor = [Drawing.Color]::Transparent
 $lblMode.Location = New-Object Drawing.Point(26, 102)
 
-$rdoWatch = New-Object Windows.Forms.RadioButton
-$rdoWatch.Text = '常驻守护（推荐）   — 开机自启后台，打开启动器时检测、关闭后自动修复'
-$rdoWatch.Location = New-Object Drawing.Point(26, 126)
-$rdoWatch.Size = New-Object Drawing.Size(640, 22)
+$F_Radio = New-Object Drawing.Font('Microsoft YaHei UI', 9.5)
+$F_Hint  = New-Object Drawing.Font('Microsoft YaHei UI', 8.5)
+
+$rdoWatch = New-Object PclPatchUi.RoundRadio
+$rdoWatch.MainText = '常驻守护（推荐）'
+$rdoWatch.HintText = '开机自启后台，打开启动器时检测、关闭后自动修复'
+$rdoWatch.Location = New-Object Drawing.Point(26, 122)
+$rdoWatch.Size = New-Object Drawing.Size(720, 27)
 $rdoWatch.Checked = $true
 $rdoWatch.ForeColor = $C_Text
-$rdoWatch.BackColor = [Drawing.Color]::Transparent
-$rdoWatch.Font = New-Object Drawing.Font('Microsoft YaHei UI', 9.5)
+$rdoWatch.AccentColor = $C_Primary
+$rdoWatch.HintColor = $C_Muted
+$rdoWatch.MainFont = $F_Radio
+$rdoWatch.HintFont = $F_Hint
 
-$rdoShell = New-Object Windows.Forms.RadioButton
-$rdoShell.Text = '启动壳检测   — 无后台；日常用「启动PCL.vbs」打开启动器'
-$rdoShell.Location = New-Object Drawing.Point(26, 151)
-$rdoShell.Size = New-Object Drawing.Size(640, 22)
+$rdoShell = New-Object PclPatchUi.RoundRadio
+$rdoShell.MainText = '启动壳检测'
+$rdoShell.HintText = '无后台；日常用「启动PCL.vbs」打开启动器'
+$rdoShell.Location = New-Object Drawing.Point(26, 153)
+$rdoShell.Size = New-Object Drawing.Size(720, 27)
 $rdoShell.ForeColor = $C_Text
-$rdoShell.BackColor = [Drawing.Color]::Transparent
-$rdoShell.Font = New-Object Drawing.Font('Microsoft YaHei UI', 9.5)
+$rdoShell.AccentColor = $C_Primary
+$rdoShell.HintColor = $C_Muted
+$rdoShell.MainFont = $F_Radio
+$rdoShell.HintFont = $F_Hint
 
-$rdoNone = New-Object Windows.Forms.RadioButton
-$rdoNone.Text = '不自动修复   — 更新后把新 exe 再拖一次'
-$rdoNone.Location = New-Object Drawing.Point(26, 176)
-$rdoNone.Size = New-Object Drawing.Size(640, 22)
+$rdoNone = New-Object PclPatchUi.RoundRadio
+$rdoNone.MainText = '不自动修复'
+$rdoNone.HintText = '更新后把新 exe 再拖一次'
+$rdoNone.Location = New-Object Drawing.Point(26, 184)
+$rdoNone.Size = New-Object Drawing.Size(720, 27)
 $rdoNone.ForeColor = $C_Text
-$rdoNone.BackColor = [Drawing.Color]::Transparent
-$rdoNone.Font = New-Object Drawing.Font('Microsoft YaHei UI', 9.5)
+$rdoNone.AccentColor = $C_Primary
+$rdoNone.HintColor = $C_Muted
+$rdoNone.MainFont = $F_Radio
+$rdoNone.HintFont = $F_Hint
 
-$chkBackup = New-Object Windows.Forms.CheckBox
+# 单选互斥
+$script:radioGroup = @($rdoWatch, $rdoShell, $rdoNone)
+foreach ($r in $script:radioGroup) {
+    $r.Add_Click({
+        param($src, $e)
+        foreach ($other in $script:radioGroup) {
+            if (-not [object]::ReferenceEquals($other, $src)) { $other.Checked = $false }
+        }
+        $src.Checked = $true
+    })
+}
+
+$chkBackup = New-Object PclPatchUi.RoundCheck
 $chkBackup.Text = '打补丁前复制一份备份到同目录'
-$chkBackup.Location = New-Object Drawing.Point(26, 204)
-$chkBackup.Size = New-Object Drawing.Size(320, 22)
+$chkBackup.Location = New-Object Drawing.Point(26, 218)
+$chkBackup.Size = New-Object Drawing.Size(340, 24)
 $chkBackup.ForeColor = [Drawing.ColorTranslator]::FromHtml('#6b7280')
-$chkBackup.BackColor = [Drawing.Color]::Transparent
+$chkBackup.AccentColor = $C_Primary
 $chkBackup.Font = New-Object Drawing.Font('Microsoft YaHei UI', 9)
 
 $lblPristine = New-Object Windows.Forms.Label
@@ -182,7 +225,7 @@ $lblPristine.ForeColor = $C_Hint
 $lblPristine.Font = $F_Small
 $lblPristine.AutoSize = $true
 $lblPristine.BackColor = [Drawing.Color]::Transparent
-$lblPristine.Location = New-Object Drawing.Point(26, 232)
+$lblPristine.Location = New-Object Drawing.Point(26, 248)
 
 $lnkClean = New-Object Windows.Forms.LinkLabel
 $lnkClean.Text = '清理原始备份'
@@ -218,9 +261,9 @@ function New-RoundButton {
     return $b
 }
 
-$btnPatch = New-RoundButton -Label '开始打补丁' -Back $C_Primary -Fore ([Drawing.Color]::White) -Border ([Drawing.Color]::Transparent) -X 32 -Y 382 -W 132
-$btnLaunch = New-RoundButton -Label '启动PCL' -Back $C_Card -Fore $C_Text -Border $C_Border -X 176 -Y 382 -W 116
-$btnUninstall = New-RoundButton -Label '卸载补丁' -Back $C_DangerBg -Fore $C_Danger -Border ([Drawing.ColorTranslator]::FromHtml('#f0d9d7')) -X 304 -Y 382 -W 116
+$btnPatch = New-RoundButton -Label '开始打补丁' -Back $C_Primary -Fore ([Drawing.Color]::White) -Border ([Drawing.Color]::Transparent) -X 32 -Y 402 -W 132
+$btnLaunch = New-RoundButton -Label '启动PCL' -Back $C_Card -Fore $C_Text -Border $C_Border -X 176 -Y 402 -W 116
+$btnUninstall = New-RoundButton -Label '卸载补丁' -Back $C_DangerBg -Fore $C_Danger -Border ([Drawing.ColorTranslator]::FromHtml('#f0d9d7')) -X 304 -Y 402 -W 116
 $btnUninstall.Anchor = 'Top,Left'
 
 $lblStatus = New-Object Windows.Forms.Label
@@ -232,7 +275,7 @@ $lblStatus.Anchor = 'Top,Right'
 
 # ============================ 输出区 ============================
 $outBox = New-Object PclPatchUi.RoundRichText
-$outBox.Location = New-Object Drawing.Point(32, 434)
+$outBox.Location = New-Object Drawing.Point(32, 456)
 $outBox.Size = New-Object Drawing.Size(836, 176)
 $outBox.Anchor = 'Top,Bottom,Left,Right'
 $outBox.CornerRadius = 10
@@ -475,13 +518,13 @@ function Update-Layout {
     $card.Width = $innerW
     $pathBox.Width = $innerW - 26 - 90
     $btnBrowse.Location = New-Object Drawing.Point(($pathBox.Right + 12), 58)
-    $lnkClean.Location = New-Object Drawing.Point(($lblPristine.Right), 232)
+    $lnkClean.Location = New-Object Drawing.Point(($lblPristine.Right), 248)
 
     $outBox.Width = $innerW
-    $outBox.Top = 434
-    $outBox.Height = [Math]::Max(120, $form.ClientSize.Height - 434 - $pad)
+    $outBox.Top = 456
+    $outBox.Height = [Math]::Max(120, $form.ClientSize.Height - 456 - $pad)
 
-    $lblStatus.Location = New-Object Drawing.Point(($innerW + $pad - $lblStatus.Width), 392)
+    $lblStatus.Location = New-Object Drawing.Point(($innerW + $pad - $lblStatus.Width), 412)
 }
 
 $form.Add_Shown({
