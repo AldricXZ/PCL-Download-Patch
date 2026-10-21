@@ -6,7 +6,7 @@ Set-Content $lock $PID -Encoding ascii
 try {
     $pathFile = Join-Path $here 'wrapper-path.txt'
     if (-not (Test-Path $pathFile)) { return }
-    $exe = (Get-Content $pathFile -TotalCount 1).Trim()
+    $exe = (Get-Content $pathFile -TotalCount 1 -Encoding Unicode).Trim()
     if (-not $exe -or -not (Test-Path -LiteralPath $exe)) { return }
     $launcherName = 'Plain Craft Launcher 2'
     $hashFile = Join-Path $here '.lastpatched.sha256'
