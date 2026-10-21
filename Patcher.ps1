@@ -7,7 +7,8 @@ param(
     [switch]$Uninstall,
     [switch]$Status,
     [switch]$CleanPristine,
-    [switch]$LaunchShell
+    [switch]$LaunchShell,
+    [switch]$GuiTask
 )
 $ErrorActionPreference = 'Stop'
 $script:here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -56,6 +57,12 @@ function Remove-RuntimeState {
     }
     Get-ChildItem -LiteralPath $here -Filter '.notified_*.flag' -File -ErrorAction SilentlyContinue |
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+}
+
+# ---------- 参数来源：-ExePath 缺省时回退到环境变量 PCLPATCH_EXE（GUI 单 exe 通过它传递用户路径） ----------
+if ([string]::IsNullOrEmpty($ExePath)) {
+    $envExe = [Environment]::GetEnvironmentVariable('PCLPATCH_EXE')
+    if (-not [string]::IsNullOrEmpty($envExe)) { $ExePath = $envExe.Trim() }
 }
 
 # ---------- 状态查询模式（供 GUI 使用，输出 JSON） ----------
@@ -128,6 +135,80 @@ if ($LaunchShell) {
     }
     Start-Process -FilePath $ExePath -WorkingDirectory (Split-Path -Parent $ExePath)
     exit 0
+}
+
+# ---------- GUI 任务模式（单 exe 界面通过 gui-task.json 下发任务，输出写 gui-out.log） ----------
+if ($GuiTask) {
+    $taskFile = Join-Path $here 'gui-task.json'
+    $outFile = Join-Path $here 'gui-out.log'
+    if (-not (Test-Path -LiteralPath $taskFile)) {
+        Set-Content -LiteralPath $outFile -Value '[失败] 未找到 gui-task.json' -Encoding UTF8
+        exit 1
+    }
+    try {
+        $task = Get-Content -LiteralPath $taskFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        Set-Content -LiteralPath $outFile -Value ('[失败] 任务文件解析失败：' + $_.Exception.Message) -Encoding UTF8
+        exit 1
+    }
+
+    # 输出重定向到 gui-out.log（GUI 轮询显示）
+    function Write-GuiLog([string]$msg) {
+        Write-Output $msg
+        Add-Content -LiteralPath $outFile -Value $msg -Encoding UTF8
+    }
+    Set-Content -LiteralPath $outFile -Value '' -Encoding UTF8
+
+    $action = [string]$task.action
+    if ($action -eq 'status') {
+        # 状态：JSON 输出进 gui-out.log
+        $statusJson = & $PSCommandPath -Status
+        Set-Content -LiteralPath $outFile -Value ($statusJson -join "`n") -Encoding UTF8
+        exit 0
+    }
+
+    $taskExe = [string]$task.exePath
+    if (-not [string]::IsNullOrEmpty($taskExe)) { $ExePath = $taskExe }
+
+    if ($action -eq 'patch') {
+        Write-GuiLog "==== PCL 下载功能补丁（图形界面）===="
+        if ([string]::IsNullOrEmpty($ExePath) -or -not (Test-Path -LiteralPath $ExePath)) {
+            Write-GuiLog "[失败] 请先选择启动器 exe。"
+            exit 1
+        }
+        $mode = [string]$task.mode
+        if ($mode -notin @('watch', 'shell', 'none')) { $mode = 'watch' }
+        if ([string]$task.backup -eq '1') {
+            & $PSCommandPath -ExePath $ExePath -AutoFix $mode -Backup | ForEach-Object { Write-GuiLog $_ }
+        } else {
+            & $PSCommandPath -ExePath $ExePath -AutoFix $mode | ForEach-Object { Write-GuiLog $_ }
+        }
+        $guiExit = $LASTEXITCODE
+        if ($guiExit -eq 0) { Write-GuiLog "补丁完成。" }
+        exit $guiExit
+    }
+
+    if ($action -eq 'uninstall') {
+        if (-not [string]::IsNullOrEmpty($ExePath)) {
+            & $PSCommandPath -Uninstall -ExePath $ExePath | ForEach-Object { Write-GuiLog $_ }
+        } else {
+            & $PSCommandPath -Uninstall | ForEach-Object { Write-GuiLog $_ }
+        }
+        exit $LASTEXITCODE
+    }
+
+    if ($action -eq 'clean') {
+        & $PSCommandPath -CleanPristine | ForEach-Object { Write-GuiLog $_ }
+        exit $LASTEXITCODE
+    }
+
+    if ($action -eq 'launch') {
+        & $PSCommandPath -LaunchShell | ForEach-Object { Write-GuiLog $_ }
+        exit $LASTEXITCODE
+    }
+
+    Set-Content -LiteralPath $outFile -Value ('[失败] 未知任务：' + $action) -Encoding UTF8
+    exit 1
 }
 
 # ---------- 卸载模式 ----------
