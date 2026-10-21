@@ -17,10 +17,12 @@ $args += '/target:winexe'
 $args += '/platform:anycpu'
 $args += '/out:"' + $outExe + '"'
 $args += '/optimize+'
+$args += '/win32icon:"' + (Join-Path $pkg 'app.ico') + '"'
 foreach ($r in $gacRefs) { $args += '/r:"' + $r + '"' }
 $args += '/r:System.dll'
 $args += '/r:System.Core.dll'
 $args += '/r:System.Xml.dll'
+$args += '/r:System.Drawing.dll'
 $args += '"' + (Join-Path $pkg 'PclPatchGui.cs') + '"'
 
 $cmd = '& "' + $csc + '" ' + ($args -join ' ')

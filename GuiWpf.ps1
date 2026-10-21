@@ -163,7 +163,7 @@ function New-RadioRow([string]$main, [string]$hint, [bool]$isChecked) {
 }
 
 $rdoWatch = New-RadioRow '常驻守护（推荐）' '开机自启后台，打开启动器时检测、关闭后自动修复' $true
-$rdoShell = New-RadioRow '启动壳检测' '无后台；日常用「启动PCL.vbs」打开启动器' $false
+$rdoShell = New-RadioRow '启动壳检测' '无后台；日常用「启动PCL.exe」打开启动器' $false
 $rdoNone  = New-RadioRow '不自动修复' '更新后把新 exe 再拖一次' $false
 
 $script:radios = @($rdoWatch, $rdoShell, $rdoNone)

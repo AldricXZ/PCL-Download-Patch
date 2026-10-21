@@ -28,13 +28,24 @@ function Get-PristineState {
 }
 
 function Remove-Daemon {
-    # 移除常驻守护：Startup 自启文件 + 运行中的 wscript
+    # 移除常驻守护：Startup 自启项（新版 lnk / 旧版 vbs）+ 运行中的守护进程（新版 exe / 旧版 wscript）
     $removed = 0
     $startup = [Environment]::GetFolderPath('Startup')
-    $startupVbs = Join-Path $startup 'PCL自动修复.vbs'
-    if (Test-Path -LiteralPath $startupVbs) {
-        Remove-Item -LiteralPath $startupVbs -Force -ErrorAction SilentlyContinue
-        $removed++
+    foreach ($name in @('PCL自动修复.lnk', 'PCL自动修复.vbs')) {
+        $p = Join-Path $startup $name
+        if (Test-Path -LiteralPath $p) {
+            Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
+            $removed++
+        }
+    }
+    try {
+        $procs = @(Get-Process -Name 'Watch-PCL' -ErrorAction SilentlyContinue)
+        if ($procs.Count -gt 0) {
+            $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+            $removed += $procs.Count
+        }
+    } catch {
+        Write-Verbose ("结束守护进程失败：" + $_.Exception.Message)
     }
     try {
         Get-CimInstance Win32_Process -Filter "Name='wscript.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
@@ -73,11 +84,13 @@ if ($Status) {
         $knownExe = (Get-Content -LiteralPath $pathFile -TotalCount 1 -Encoding Unicode).Trim()
     }
     $startup = [Environment]::GetFolderPath('Startup')
-    $hasDaemonFile = Test-Path -LiteralPath (Join-Path $startup 'PCL自动修复.vbs')
+    $hasDaemonFile = (Test-Path -LiteralPath (Join-Path $startup 'PCL自动修复.lnk')) -or
+        (Test-Path -LiteralPath (Join-Path $startup 'PCL自动修复.vbs'))
     $daemonRunning = $false
     try {
-        $daemonRunning = @(Get-CimInstance Win32_Process -Filter "Name='wscript.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -match 'Watch-PCL\.vbs' }).Count -gt 0
+        $daemonRunning = (@(Get-Process -Name 'Watch-PCL' -ErrorAction SilentlyContinue).Count -gt 0) -or
+            (@(Get-CimInstance Win32_Process -Filter "Name='wscript.exe'" -ErrorAction SilentlyContinue |
+                Where-Object { $_.CommandLine -match 'Watch-PCL\.vbs' }).Count -gt 0)
     } catch {
         Write-Verbose ("查询守护进程失败：" + $_.Exception.Message)
     }
@@ -249,7 +262,7 @@ if ([string]::IsNullOrEmpty($ExePath)) {
     Write-Log "      「拖我上去_常规版.bat」只打补丁，不安装任何自动修复。"
     Write-Log "      建议打补丁前先手动备份：复制一份 exe 改名保存，出问题复制回来即可还原。"
     Write-Log "      菜单可选更新后的自动修复方式："
-    Write-Log "        1) 启动壳检测 —— 用补丁包里的「启动PCL.vbs」启动启动器，启动前自动修复（无后台）"
+    Write-Log "        1) 启动壳检测 —— 用补丁包里的「启动PCL.exe」启动启动器，启动前自动修复（无后台）"
     Write-Log "        2) 常驻守护（推荐）—— 开机自启后台守护，打开启动器时检测，关闭后自动修复"
     Write-Log ""
     Write-Log "谁需要打补丁（补丁器也会自动判断）："
@@ -766,21 +779,39 @@ try {
     Set-Content -Path (Join-Path $here 'wrapper-path.txt') -Value $srcPath -Encoding Unicode
     Set-Content -Path (Join-Path $here '.lastpatched.sha256') -Value (Get-FileHash -Algorithm SHA256 -LiteralPath $srcPath).Hash -Encoding ascii
     $startup = [Environment]::GetFolderPath('Startup')
+    $startupLnk = Join-Path $startup 'PCL自动修复.lnk'
     $startupVbs = Join-Path $startup 'PCL自动修复.vbs'
     if ($AutoFix -eq 'watch') {
-        $vbs = Join-Path $here 'Watch-PCL.vbs'
-        if (Test-Path $vbs) {
-            $loader = 'CreateObject("Wscript.Shell").Run "wscript.exe ""' + $vbs + '""", 0, False'
-            Set-Content -Path $startupVbs -Value $loader -Encoding ascii
-            Write-Log "已设置常驻守护（Startup\PCL自动修复.vbs 开机自启，后台约 15MB，无窗口）："
+        $daemonExe = Join-Path $here 'Watch-PCL.exe'
+        if (Test-Path $daemonExe) {
+            $ws = New-Object -ComObject WScript.Shell
+            $sc = $ws.CreateShortcut($startupLnk)
+            $sc.TargetPath = $daemonExe
+            $sc.WorkingDirectory = $here
+            $sc.Description = 'PCL 下载补丁 · 常驻守护'
+            $sc.Save()
+            [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($ws)
+            if (Test-Path $startupVbs) { Remove-Item $startupVbs -Force -ErrorAction SilentlyContinue }   # 旧版 vbs 自启升级为快捷方式
+            Write-Log "已设置常驻守护（Startup\PCL自动修复.lnk 开机自启，后台无窗口）："
             Write-Log "  - 每次打开启动器的瞬间都会检查，发现更新弹一次提示；"
             Write-Log "  - 关闭启动器后几秒内自动完成修复，下次打开即恢复，全程无需操作。"
-            Write-Log "  - 桌面快捷方式保持不变，直接双击启动即可。移除守护：删除 Startup 文件夹里的 PCL自动修复.vbs。"
+            Write-Log "  - 桌面快捷方式保持不变，直接双击启动即可。移除守护：删除 Startup 文件夹里的 PCL自动修复.lnk。"
+        } else {
+            Write-Log "[提示] 包内缺少 Watch-PCL.exe，未安装常驻守护（不影响补丁结果）。"
         }
     } else {
-        # 启动壳 / 不自动修复：移除常驻守护（开机自启文件 + 正在运行的守护进程）
-        $hadStartup = Test-Path $startupVbs
+        # 启动壳 / 不自动修复：移除常驻守护（自启项 + 正在运行的守护进程）
+        $hadStartup = (Test-Path $startupLnk) -or (Test-Path $startupVbs)
         $killed = 0
+        try {
+            $procs = @(Get-Process -Name 'Watch-PCL' -ErrorAction SilentlyContinue)
+            if ($procs.Count -gt 0) {
+                $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+                $killed += $procs.Count
+            }
+        } catch {
+            Write-Verbose ("清理旧守护失败：" + $_.Exception.Message)
+        }
         try {
             Get-CimInstance Win32_Process -Filter "Name='wscript.exe'" | ForEach-Object {
                 if ($_.CommandLine -match 'Watch-PCL\.vbs') {
@@ -791,12 +822,14 @@ try {
         } catch {
             Write-Verbose ("清理旧守护失败：" + $_.Exception.Message)
         }
-        if ($hadStartup) { Remove-Item $startupVbs -Force -ErrorAction SilentlyContinue }
+        foreach ($p in @($startupLnk, $startupVbs)) {
+            if (Test-Path $p) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
+        }
         if ($killed -gt 0 -or $hadStartup) { Write-Log "已移除之前的常驻守护（已在运行的守护进程随之退出）。" }
         if ($AutoFix -eq 'shell') {
             Write-Log "已切换为启动壳检测（无后台常驻）："
-            Write-Log "  - 以后请用本补丁包里的「启动PCL.vbs」打开启动器：启动前会自动检测更新并修复。"
-            Write-Log "  - 也可以右键「启动PCL.vbs」发送到桌面，代替原快捷方式。"
+            Write-Log "  - 以后请用本补丁包里的「启动PCL.exe」打开启动器：启动前会自动检测更新并修复。"
+            Write-Log "  - 也可以右键「启动PCL.exe」发送到桌面，代替原快捷方式。"
         } else {
             Write-Log "未安装任何自动修复：以后启动器更新后，把新 exe 再拖到「拖我上去.bat」或「拖我上去_常规版.bat」打一次即可。"
         }
