@@ -98,6 +98,26 @@ namespace PclPatchGui
 
         public MainWindow()
         {
+            // 窗口/任务栏图标：exe 内嵌的 app.ico 资源提取
+            try
+            {
+                var exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                var ico = System.Drawing.Icon.ExtractAssociatedIcon(exePath);
+                if (ico != null)
+                {
+                    using (var ms = new System.IO.MemoryStream())
+                    {
+                        ico.Save(ms);
+                        ms.Position = 0;
+                        Icon = System.Windows.Media.Imaging.BitmapFrame.Create(ms);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("图标加载失败: " + ex.Message);
+            }
+
             BuildUi();
             BuildRadioRows();
             WireEvents();
