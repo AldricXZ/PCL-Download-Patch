@@ -10,11 +10,24 @@ param()
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 
-[System.Windows.Forms.Application]::EnableVisualStyles()
-
 $script:here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:patcher = Join-Path $script:here 'Patcher.ps1'
 $script:busy = $false
+
+# 编译自定义圆角控件（每次启动重新编译，避免缓存旧版本）
+$csFile = Join-Path $script:here 'PclPatchUi.cs'
+if (-not (Test-Path -LiteralPath $csFile)) {
+    [Windows.Forms.MessageBox]::Show("缺少 PclPatchUi.cs，请确认补丁包完整。", 'PCL 下载补丁',
+        [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+    exit 1
+}
+$csCode = Get-Content -LiteralPath $csFile -Raw -Encoding UTF8
+if (-not ('PclPatchUi.RoundPanel' -as [type])) {
+    Add-Type -TypeDefinition $csCode -ReferencedAssemblies System.Drawing, System.Windows.Forms
+}
+
+[Windows.Forms.Application]::EnableVisualStyles()
+[Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
 
 # ============================ 配色 ============================
 $C_Bg       = [Drawing.ColorTranslator]::FromHtml('#f7f8fa')
@@ -25,32 +38,32 @@ $C_Text     = [Drawing.ColorTranslator]::FromHtml('#3d444d')
 $C_Muted    = [Drawing.ColorTranslator]::FromHtml('#9aa3af')
 $C_Hint     = [Drawing.ColorTranslator]::FromHtml('#a8b0bb')
 $C_Border   = [Drawing.ColorTranslator]::FromHtml('#e3e6ea')
-$C_InputBg  = [Drawing.ColorTranslator]::FromHtml('#fbfbfc')
 $C_Primary  = [Drawing.ColorTranslator]::FromHtml('#3b82f6')
 $C_Link     = [Drawing.ColorTranslator]::FromHtml('#6f9ad4')
 $C_Danger   = [Drawing.ColorTranslator]::FromHtml('#b0413a')
 $C_DangerBg = [Drawing.ColorTranslator]::FromHtml('#fdf6f5')
 $C_Ok       = [Drawing.ColorTranslator]::FromHtml('#16a34a')
 $C_Err      = [Drawing.ColorTranslator]::FromHtml('#dc2626')
-$C_Gold1    = [Drawing.ColorTranslator]::FromHtml('#b8894c')
 $C_Gold2    = [Drawing.ColorTranslator]::FromHtml('#e3c68f')
+
+$F_Base  = New-Object Drawing.Font('Microsoft YaHei UI', 9)
+$F_Title = New-Object Drawing.Font('Microsoft YaHei UI', 15)
+$F_Mono  = New-Object Drawing.Font('Consolas', 9)
+$F_Small = New-Object Drawing.Font('Microsoft YaHei UI', 8)
 
 # ============================ 窗体 ============================
 $form = New-Object Windows.Forms.Form
 $form.Text = 'PCL 下载补丁'
-$form.AutoScaleMode = [Windows.Forms.AutoScaleMode]::Font
+$form.AutoScaleMode = [Windows.Forms.AutoScaleMode]::Dpi
 $form.ClientSize = New-Object Drawing.Size(900, 640)
-$form.MinimumSize = New-Object Drawing.Size(820, 600)
+$form.MinimumSize = New-Object Drawing.Size(760, 560)
 $form.StartPosition = 'CenterScreen'
 $form.BackColor = $C_Bg
-$form.Font = New-Object Drawing.Font('Microsoft YaHei UI', 9)
-
-$F_Title = New-Object Drawing.Font('Microsoft YaHei UI', 15)
-$F_Mono = New-Object Drawing.Font('Consolas', 9)
+$form.Font = $F_Base
 
 # ============================ 头部 ============================
 $logo = New-Object Windows.Forms.PictureBox
-$logo.Location = New-Object Drawing.Point(32, 22)
+$logo.Location = New-Object Drawing.Point(32, 20)
 $logo.Size = New-Object Drawing.Size(52, 52)
 $logo.BackColor = [Drawing.Color]::Transparent
 $logo.Add_Paint({
@@ -60,15 +73,13 @@ $logo.Add_Paint({
         $g.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::AntiAlias
         $pen = [Drawing.Pen]::new($C_Gold2, 2.6)
         $pen.LineJoin = [Drawing.Drawing2D.LineJoin]::Round
-        $p = [Drawing.PointF[]]@(
+        $g.DrawPolygon($pen, [Drawing.PointF[]]@(
             [Drawing.PointF]::new(6, 16), [Drawing.PointF]::new(26, 16),
             [Drawing.PointF]::new(40, 26), [Drawing.PointF]::new(26, 36),
-            [Drawing.PointF]::new(6, 36)
-        )
-        $g.DrawPolygon($pen, $p)
+            [Drawing.PointF]::new(6, 36)))
         $pen.Dispose()
     } catch {
-        Write-Verbose ("logo 绘制失败: " + $_.Exception.Message)
+        Write-Verbose ("logo 绘制失败：" + $_.Exception.Message)
     }
 })
 
@@ -78,114 +89,24 @@ $lblTitle.Font = $F_Title
 $lblTitle.ForeColor = $C_Title
 $lblTitle.AutoSize = $true
 $lblTitle.BackColor = [Drawing.Color]::Transparent
-$lblTitle.Location = New-Object Drawing.Point(98, 24)
+$lblTitle.Location = New-Object Drawing.Point(100, 22)
 
 $lblSub = New-Object Windows.Forms.Label
 $lblSub.Text = '恢复新版 PCL 被关闭的下载功能'
 $lblSub.ForeColor = $C_Sub
 $lblSub.AutoSize = $true
 $lblSub.BackColor = [Drawing.Color]::Transparent
-$lblSub.Location = New-Object Drawing.Point(100, 54)
+$lblSub.Location = New-Object Drawing.Point(102, 52)
 
 # ============================ 主卡片 ============================
-$card = New-Object Windows.Forms.Panel
+$card = New-Object PclPatchUi.RoundPanel
 $card.Location = New-Object Drawing.Point(32, 92)
-$card.Size = New-Object Drawing.Size(836, 268)
-$card.BackColor = $C_Bg
-$card.Add_Paint({
-    param($src, $e)    $g = $e.Graphics
-    try {
-        $g.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::AntiAlias
-        $w = [single]$src.Width
-        $h = [single]$src.Height
-        $r = [single]14
-
-        # 圆角边框
-        $path = [Drawing.Drawing2D.GraphicsPath]::new()
-        $d = [single]($r * 2)
-        $path.AddArc([single]0, [single]0, $d, $d, [single]180, [single]90)
-        $path.AddArc([single]($w - $d - 1), [single]0, $d, $d, [single]270, [single]90)
-        $path.AddArc([single]($w - $d - 1), [single]($h - $d - 1), $d, $d, [single]0, [single]90)
-        $path.AddArc([single]0, [single]($h - $d - 1), $d, $d, [single]90, [single]90)
-        $path.CloseFigure()
-
-        $bg = [Drawing.SolidBrush]::new($C_Card)
-        $g.FillPath($bg, $path)
-        $penB = [Drawing.Pen]::new($C_Border, 1)
-        $g.DrawPath($penB, $path)
-        $bg.Dispose(); $penB.Dispose()
-
-        # ---- 右下角淡金卷草纹（线 10% / 叶 7.5% / 花 8.5%）----
-        # 图案坐标范围约 200x170；缩放 0.60 后约 120x102，贴右下角
-        $gs = $g.Save()
-        $g.SetClip($path, [Drawing.Drawing2D.CombineMode]::Intersect)
-        $scale = [single]0.60
-        $g.TranslateTransform([single]($w - 132), [single]($h - 122))
-        $g.ScaleTransform($scale, $scale)
-
-        $grad = [Drawing.Drawing2D.LinearGradientBrush]::new(
-            [Drawing.Point]::new(0, 200), [Drawing.Point]::new(200, 0),
-            $C_Gold1, $C_Gold2)
-
-        $penL = [Drawing.Pen]::new($grad, [single]2.2)
-        $penL.StartCap = [Drawing.Drawing2D.LineCap]::Round
-        $penL.EndCap = [Drawing.Drawing2D.LineCap]::Round
-        $penL.LineJoin = [Drawing.Drawing2D.LineJoin]::Round
-
-        # 逐段三次贝塞尔（GDI+ 的 DrawCurve 是样条插值，与 SVG 的 C 语义不同）
-        $g.DrawBezier($penL, [Drawing.PointF]::new(26,168), [Drawing.PointF]::new(8,150), [Drawing.PointF]::new(10,118), [Drawing.PointF]::new(34,106))
-        $g.DrawBezier($penL, [Drawing.PointF]::new(34,106), [Drawing.PointF]::new(62,86), [Drawing.PointF]::new(92,72), [Drawing.PointF]::new(110,64))
-        $g.DrawBezier($penL, [Drawing.PointF]::new(110,64), [Drawing.PointF]::new(132,50), [Drawing.PointF]::new(156,38), [Drawing.PointF]::new(172,22))
-        $g.DrawBezier($penL, [Drawing.PointF]::new(172,22), [Drawing.PointF]::new(182,8), [Drawing.PointF]::new(197,12), [Drawing.PointF]::new(198,25))
-        $g.DrawBezier($penL, [Drawing.PointF]::new(198,25), [Drawing.PointF]::new(199,36), [Drawing.PointF]::new(188,42), [Drawing.PointF]::new(181,36))
-        $g.DrawBezier($penL, [Drawing.PointF]::new(110,64), [Drawing.PointF]::new(108,82), [Drawing.PointF]::new(112,100), [Drawing.PointF]::new(124,110))
-        $g.DrawBezier($penL, [Drawing.PointF]::new(124,110), [Drawing.PointF]::new(136,121), [Drawing.PointF]::new(154,119), [Drawing.PointF]::new(156,108))
-        $g.DrawBezier($penL, [Drawing.PointF]::new(92,72), [Drawing.PointF]::new(86,56), [Drawing.PointF]::new(90,40), [Drawing.PointF]::new(102,28))
-        $g.DrawBezier($penL, [Drawing.PointF]::new(62,86), [Drawing.PointF]::new(52,70), [Drawing.PointF]::new(50,54), [Drawing.PointF]::new(58,42))
-        $penL.Dispose()
-
-        # 叶片（实心）
-        $leafBrush = [Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(19, $C_Gold1))
-        $leafSets = @(
-            [Drawing.PointF[]]@([Drawing.PointF]::new(102,28), [Drawing.PointF]::new(106,14), [Drawing.PointF]::new(118,6), [Drawing.PointF]::new(128,8), [Drawing.PointF]::new(124,22), [Drawing.PointF]::new(114,30)),
-            [Drawing.PointF[]]@([Drawing.PointF]::new(58,42), [Drawing.PointF]::new(52,28), [Drawing.PointF]::new(56,14), [Drawing.PointF]::new(66,10), [Drawing.PointF]::new(70,24), [Drawing.PointF]::new(66,38)),
-            [Drawing.PointF[]]@([Drawing.PointF]::new(144,48), [Drawing.PointF]::new(152,34), [Drawing.PointF]::new(166,28), [Drawing.PointF]::new(176,32), [Drawing.PointF]::new(168,46), [Drawing.PointF]::new(156,52)),
-            [Drawing.PointF[]]@([Drawing.PointF]::new(80,124), [Drawing.PointF]::new(68,118), [Drawing.PointF]::new(62,106), [Drawing.PointF]::new(66,96), [Drawing.PointF]::new(78,102), [Drawing.PointF]::new(84,114)),
-            [Drawing.PointF[]]@([Drawing.PointF]::new(132,114), [Drawing.PointF]::new(142,122), [Drawing.PointF]::new(146,134), [Drawing.PointF]::new(141,143), [Drawing.PointF]::new(130,136), [Drawing.PointF]::new(126,124))
-        )
-        foreach ($lf in $leafSets) {
-            $gp = [Drawing.Drawing2D.GraphicsPath]::new()
-            $gp.AddClosedCurve($lf, [single]0.4)
-            $g.FillPath($leafBrush, $gp)
-            $gp.Dispose()
-        }
-        $leafBrush.Dispose()
-
-        # 三瓣小花
-        $fb = [Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(22, $C_Gold1))
-        foreach ($f in @(@(66, 10, 0.62), @(181, 36, 0.5))) {
-            $gs2 = $g.Save()
-            $g.TranslateTransform([single]$f[0], [single]$f[1])
-            $g.ScaleTransform([single]$f[2], [single]$f[2])
-            for ($i = 0; $i -lt 3; $i++) {
-                $gs3 = $g.Save()
-                $g.RotateTransform([single]($i * 120))
-                $g.FillEllipse($fb, [single]-9, [single]-26, [single]18, [single]26)
-                $g.Restore($gs3)
-            }
-            $g.Restore($gs2)
-        }
-        $fb.Dispose()
-
-        $g.Restore($gs)
-        $g.ResetClip()
-        $grad.Dispose()
-        $path.Dispose()
-    } catch {
-        Write-Verbose ("卡片绘制失败: " + $_.Exception.Message)
-        try { ("[卡片绘制失败] " + $_.Exception.ToString()) | Out-File (Join-Path $env:TEMP 'pcl-gui-paint.log') -Append -Encoding utf8 } catch { Write-Verbose "日志写入失败" }
-    }
-})
+$card.Size = New-Object Drawing.Size(836, 272)
+$card.Anchor = 'Top,Left,Right'
+$card.CornerRadius = 14
+$card.FillColor = $C_Card
+$card.BorderColor = $C_Border
+$card.DrawFiligree = $true
 
 $lblCardTitle = New-Object Windows.Forms.Label
 $lblCardTitle.Text = '启动器'
@@ -195,145 +116,132 @@ $lblCardTitle.AutoSize = $true
 $lblCardTitle.BackColor = [Drawing.Color]::Transparent
 $lblCardTitle.Location = New-Object Drawing.Point(26, 20)
 
-$txtPath = New-Object Windows.Forms.TextBox
-$txtPath.Location = New-Object Drawing.Point(26, 48)
-$txtPath.Size = New-Object Drawing.Size(660, 26)
-$txtPath.BorderStyle = [Windows.Forms.BorderStyle]::FixedSingle
-$txtPath.BackColor = $C_InputBg
-$txtPath.Font = $script:form.Font
-$txtPath.ForeColor = $C_Muted
-$txtPath.Text = '把 Plain Craft Launcher 2.exe 拖到这里，或点右侧浏览'
-$script:pathPlaceholder = $true
+$pathBox = New-Object PclPatchUi.RoundTextBox
+$pathBox.Location = New-Object Drawing.Point(26, 46)
+$pathBox.Size = New-Object Drawing.Size(660, 40)
+$pathBox.CornerRadius = 8
+$pathBox.Anchor = 'Top,Left,Right'
 
-$txtPath.Add_Enter({
-    if ($script:pathPlaceholder) {
-        $txtPath.Text = ''
-        $txtPath.ForeColor = $C_Text
-        $script:pathPlaceholder = $false
-    }
-})
-$txtPath.Add_Leave({
-    if ([string]::IsNullOrWhiteSpace($txtPath.Text)) {
-        $txtPath.ForeColor = $C_Muted
-        $txtPath.Text = '把 Plain Craft Launcher 2.exe 拖到这里，或点右侧浏览'
-        $script:pathPlaceholder = $true
-    }
-})
+$txtPath = $pathBox.Inner
+$txtPath.Font = New-Object Drawing.Font('Microsoft YaHei UI', 9.5)
+$txtPath.ForeColor = $C_Muted
+$script:pathPlaceholder = $true
+$txtPath.Text = '把 Plain Craft Launcher 2.exe 拖到这里，或点右侧浏览'
 
 $btnBrowse = New-Object Windows.Forms.LinkLabel
 $btnBrowse.Text = '浏览…'
+$btnBrowse.Font = New-Object Drawing.Font('Microsoft YaHei UI', 9.5)
 $btnBrowse.LinkColor = $C_Link
 $btnBrowse.ActiveLinkColor = $C_Primary
 $btnBrowse.AutoSize = $true
 $btnBrowse.BackColor = [Drawing.Color]::Transparent
-$btnBrowse.Location = New-Object Drawing.Point(700, 53)
 
-$lblModeTitle = New-Object Windows.Forms.Label
-$lblModeTitle.Text = '更新后如何自动恢复补丁'
-$lblModeTitle.ForeColor = [Drawing.ColorTranslator]::FromHtml('#5b6470')
-$lblModeTitle.AutoSize = $true
-$lblModeTitle.BackColor = [Drawing.Color]::Transparent
-$lblModeTitle.Location = New-Object Drawing.Point(26, 90)
+$lblMode = New-Object Windows.Forms.Label
+$lblMode.Text = '更新后如何自动恢复补丁'
+$lblMode.ForeColor = [Drawing.ColorTranslator]::FromHtml('#5b6470')
+$lblMode.AutoSize = $true
+$lblMode.BackColor = [Drawing.Color]::Transparent
+$lblMode.Location = New-Object Drawing.Point(26, 102)
 
 $rdoWatch = New-Object Windows.Forms.RadioButton
 $rdoWatch.Text = '常驻守护（推荐）   — 开机自启后台，打开启动器时检测、关闭后自动修复'
-$rdoWatch.Location = New-Object Drawing.Point(26, 114)
-$rdoWatch.Size = New-Object Drawing.Size(620, 22)
+$rdoWatch.Location = New-Object Drawing.Point(26, 126)
+$rdoWatch.Size = New-Object Drawing.Size(640, 22)
 $rdoWatch.Checked = $true
 $rdoWatch.ForeColor = $C_Text
 $rdoWatch.BackColor = [Drawing.Color]::Transparent
+$rdoWatch.Font = New-Object Drawing.Font('Microsoft YaHei UI', 9.5)
 
 $rdoShell = New-Object Windows.Forms.RadioButton
 $rdoShell.Text = '启动壳检测   — 无后台；日常用「启动PCL.vbs」打开启动器'
-$rdoShell.Location = New-Object Drawing.Point(26, 138)
-$rdoShell.Size = New-Object Drawing.Size(620, 22)
+$rdoShell.Location = New-Object Drawing.Point(26, 151)
+$rdoShell.Size = New-Object Drawing.Size(640, 22)
 $rdoShell.ForeColor = $C_Text
 $rdoShell.BackColor = [Drawing.Color]::Transparent
+$rdoShell.Font = New-Object Drawing.Font('Microsoft YaHei UI', 9.5)
 
 $rdoNone = New-Object Windows.Forms.RadioButton
 $rdoNone.Text = '不自动修复   — 更新后把新 exe 再拖一次'
-$rdoNone.Location = New-Object Drawing.Point(26, 162)
-$rdoNone.Size = New-Object Drawing.Size(620, 22)
+$rdoNone.Location = New-Object Drawing.Point(26, 176)
+$rdoNone.Size = New-Object Drawing.Size(640, 22)
 $rdoNone.ForeColor = $C_Text
 $rdoNone.BackColor = [Drawing.Color]::Transparent
+$rdoNone.Font = New-Object Drawing.Font('Microsoft YaHei UI', 9.5)
 
 $chkBackup = New-Object Windows.Forms.CheckBox
 $chkBackup.Text = '打补丁前复制一份备份到同目录'
-$chkBackup.Location = New-Object Drawing.Point(26, 192)
+$chkBackup.Location = New-Object Drawing.Point(26, 204)
 $chkBackup.Size = New-Object Drawing.Size(320, 22)
 $chkBackup.ForeColor = [Drawing.ColorTranslator]::FromHtml('#6b7280')
 $chkBackup.BackColor = [Drawing.Color]::Transparent
+$chkBackup.Font = New-Object Drawing.Font('Microsoft YaHei UI', 9)
 
 $lblPristine = New-Object Windows.Forms.Label
-$lblPristine.Text = '补丁会自动在包内保留原始 exe（约 6MB），用于「卸载补丁」完整还原'
+$lblPristine.Text = '补丁会自动在包内保留原始 exe（约 6MB），用于「卸载补丁」完整还原 · '
 $lblPristine.ForeColor = $C_Hint
-$lblPristine.Font = New-Object Drawing.Font('Microsoft YaHei UI', 8)
+$lblPristine.Font = $F_Small
 $lblPristine.AutoSize = $true
 $lblPristine.BackColor = [Drawing.Color]::Transparent
-$lblPristine.Location = New-Object Drawing.Point(26, 222)
+$lblPristine.Location = New-Object Drawing.Point(26, 232)
 
 $lnkClean = New-Object Windows.Forms.LinkLabel
 $lnkClean.Text = '清理原始备份'
-$lnkClean.Font = New-Object Drawing.Font('Microsoft YaHei UI', 8)
+$lnkClean.Font = $F_Small
 $lnkClean.LinkColor = $C_Link
 $lnkClean.AutoSize = $true
 $lnkClean.BackColor = [Drawing.Color]::Transparent
-$lnkClean.Location = New-Object Drawing.Point(470, 222)
 
-$card.Controls.AddRange(@(
-    $lblCardTitle, $txtPath, $btnBrowse, $lblModeTitle,
-    $rdoWatch, $rdoShell, $rdoNone, $chkBackup, $lblPristine, $lnkClean
-))
+$card.Controls.AddRange(@($lblCardTitle, $pathBox, $btnBrowse, $lblMode, $rdoWatch, $rdoShell, $rdoNone, $chkBackup, $lblPristine, $lnkClean))
 
 # ============================ 按钮行 ============================
-function New-FlatButton {
+function New-RoundButton {
     param(
-        [string]$Text, [Drawing.Color]$Back, [Drawing.Color]$Fore,
-        [Nullable[Drawing.Color]]$BorderColor,
+        [string]$Label,
+        [Drawing.Color]$Back,
+        [Drawing.Color]$Fore,
+        [Drawing.Color]$Border,
         [int]$X, [int]$Y, [int]$W
     )
-    $b = New-Object Windows.Forms.Button
-    $b.Text = $Text
+    $b = New-Object PclPatchUi.RoundButton
+    $b.Text = $Label
     $b.Location = New-Object Drawing.Point($X, $Y)
     $b.Size = New-Object Drawing.Size($W, 38)
-    $b.FlatStyle = [Windows.Forms.FlatStyle]::Flat
-    if ($null -ne $BorderColor) {
-        $b.FlatAppearance.BorderSize = 1
-        $b.FlatAppearance.BorderColor = $BorderColor
-    } else {
-        $b.FlatAppearance.BorderSize = 0
-    }
+    $b.CornerRadius = 8
     $b.BackColor = $Back
     $b.ForeColor = $Fore
     $b.Font = New-Object Drawing.Font('Microsoft YaHei UI', 9.5)
     $b.Cursor = [Windows.Forms.Cursors]::Hand
+    if ($Border.A -gt 0) {
+        $b.FlatAppearance.BorderSize = 1
+        $b.FlatAppearance.BorderColor = $Border
+    }
     return $b
 }
 
-$btnPatch = New-FlatButton -Text '开始打补丁' -Back $C_Primary -Fore ([Drawing.Color]::White) -BorderColor $null -X 32 -Y 378 -W 132
-$btnLaunch = New-FlatButton -Text '启动PCL' -Back $C_Card -Fore $C_Text -BorderColor $C_Border -X 178 -Y 378 -W 116
-$btnUninstall = New-FlatButton -Text '卸载补丁' -Back $C_DangerBg -Fore $C_Danger -BorderColor ([Drawing.ColorTranslator]::FromHtml('#f0d9d7')) -X 308 -Y 378 -W 116
+$btnPatch = New-RoundButton -Label '开始打补丁' -Back $C_Primary -Fore ([Drawing.Color]::White) -Border ([Drawing.Color]::Transparent) -X 32 -Y 382 -W 132
+$btnLaunch = New-RoundButton -Label '启动PCL' -Back $C_Card -Fore $C_Text -Border $C_Border -X 176 -Y 382 -W 116
+$btnUninstall = New-RoundButton -Label '卸载补丁' -Back $C_DangerBg -Fore $C_Danger -Border ([Drawing.ColorTranslator]::FromHtml('#f0d9d7')) -X 304 -Y 382 -W 116
+$btnUninstall.Anchor = 'Top,Left'
 
 $lblStatus = New-Object Windows.Forms.Label
 $lblStatus.Text = '就绪'
 $lblStatus.ForeColor = $C_Muted
 $lblStatus.AutoSize = $true
 $lblStatus.BackColor = [Drawing.Color]::Transparent
-$lblStatus.Location = New-Object Drawing.Point(820, 390)
+$lblStatus.Anchor = 'Top,Right'
 
 # ============================ 输出区 ============================
-$txtOut = New-Object Windows.Forms.RichTextBox
-$txtOut.Location = New-Object Drawing.Point(32, 430)
-$txtOut.Size = New-Object Drawing.Size(836, 180)
-$txtOut.ReadOnly = $true
-$txtOut.ScrollBars = [Windows.Forms.RichTextBoxScrollBars]::Vertical
-$txtOut.BackColor = $C_Card
-$txtOut.ForeColor = [Drawing.ColorTranslator]::FromHtml('#6b7280')
-$txtOut.Font = $F_Mono
-$txtOut.BorderStyle = [Windows.Forms.BorderStyle]::FixedSingle
-$txtOut.WordWrap = $false
+$outBox = New-Object PclPatchUi.RoundRichText
+$outBox.Location = New-Object Drawing.Point(32, 434)
+$outBox.Size = New-Object Drawing.Size(836, 176)
+$outBox.Anchor = 'Top,Bottom,Left,Right'
+$outBox.CornerRadius = 10
 
-$form.Controls.AddRange(@($logo, $lblTitle, $lblSub, $card, $btnPatch, $btnLaunch, $btnUninstall, $lblStatus, $txtOut))
+$txtOut = $outBox.Inner
+$txtOut.Font = $F_Mono
+$txtOut.ForeColor = [Drawing.ColorTranslator]::FromHtml('#6b7280')
+
+$form.Controls.AddRange(@($logo, $lblTitle, $lblSub, $card, $btnPatch, $btnLaunch, $btnUninstall, $lblStatus, $outBox))
 
 # ============================ 拖放与浏览 ============================
 function Set-ExePath {
@@ -354,14 +262,29 @@ $dragDrop = {
         $files = $e.Data.GetData([Windows.Forms.DataFormats]::FileDrop)
         if ($files -and $files.Count -gt 0) { Set-ExePath -Path $files[0] }
     } catch {
-        Write-Verbose ("拖放处理失败: " + $_.Exception.Message)
+        Write-Verbose ("拖放处理失败：" + $_.Exception.Message)
     }
 }
-foreach ($c in @($form, $card, $txtPath)) {
+foreach ($c in @($form, $card, $pathBox, $txtPath)) {
     $c.AllowDrop = $true
     $c.Add_DragEnter($dragEnter)
     $c.Add_DragDrop($dragDrop)
 }
+
+$txtPath.Add_Enter({
+    if ($script:pathPlaceholder) {
+        $txtPath.Text = ''
+        $txtPath.ForeColor = $C_Text
+        $script:pathPlaceholder = $false
+    }
+})
+$txtPath.Add_Leave({
+    if ([string]::IsNullOrWhiteSpace($txtPath.Text)) {
+        $txtPath.ForeColor = $C_Muted
+        $txtPath.Text = '把 Plain Craft Launcher 2.exe 拖到这里，或点右侧浏览'
+        $script:pathPlaceholder = $true
+    }
+})
 
 $btnBrowse.Add_LinkClicked({
     $dlg = New-Object Windows.Forms.OpenFileDialog
@@ -375,7 +298,8 @@ function Add-OutputLine {
     param([string]$Text, [Nullable[Drawing.Color]]$Color)
     $txtOut.SelectionStart = $txtOut.TextLength
     $txtOut.SelectionLength = 0
-    if ($null -ne $Color) { $txtOut.SelectionColor = $Color } else { $txtOut.SelectionColor = [Drawing.ColorTranslator]::FromHtml('#6b7280') }
+    if ($null -ne $Color) { $txtOut.SelectionColor = $Color }
+    else { $txtOut.SelectionColor = [Drawing.ColorTranslator]::FromHtml('#6b7280') }
     $txtOut.AppendText($Text + "`r`n")
     $txtOut.SelectionStart = $txtOut.TextLength
     $txtOut.ScrollToCaret()
@@ -400,9 +324,7 @@ function Invoke-PatcherProcess {
             if ($line -match '成功') { Add-OutputLine -Text $line -Color $C_Ok }
             elseif ($line -match '失败') { Add-OutputLine -Text $line -Color $C_Err }
             else { Add-OutputLine -Text $line -Color $null }
-        } else {
-            Start-Sleep -Milliseconds 50
-        }
+        } else { Start-Sleep -Milliseconds 50 }
     }
     while ($null -ne ($line = $p.StandardOutput.ReadLine())) {
         if ($line -match '成功') { Add-OutputLine -Text $line -Color $C_Ok }
@@ -419,7 +341,7 @@ function Set-BusyState {
     param([bool]$On)
     $script:busy = $On
     foreach ($b in @($btnPatch, $btnLaunch, $btnUninstall)) { $b.Enabled = -not $On }
-    if ($On) { $form.Cursor = [Windows.Forms.Cursors]::WaitCursor } else { $form.Cursor = [Windows.Forms.Cursors]::Default }
+    $form.Cursor = if ($On) { [Windows.Forms.Cursors]::WaitCursor } else { [Windows.Forms.Cursors]::Default }
     [Windows.Forms.Application]::DoEvents()
 }
 
@@ -438,22 +360,22 @@ function Update-UiState {
             $btnUninstall.BackColor = $C_Card
             $lnkClean.Visible = $false
         }
-        if ($st.KnownExeExists -and $script:pathPlaceholder) {
-            $script:pathPlaceholder = $false
-            $txtPath.Text = $st.KnownExe
-            $txtPath.ForeColor = $C_Text
-        }
     } catch {
-        Write-Verbose ("状态查询失败: " + $_.Exception.Message)
+        Write-Verbose ("状态查询失败：" + $_.Exception.Message)
     }
 }
 
 # ============================ 事件 ============================
 $btnPatch.Add_Click({
     if ($script:busy) { return }
-    $exe = $txtPath.Text.Trim()
-    if ($script:pathPlaceholder -or [string]::IsNullOrWhiteSpace($exe) -or -not (Test-Path -LiteralPath $exe)) {
+    if ($script:pathPlaceholder) {
         [Windows.Forms.MessageBox]::Show('请先选择 Plain Craft Launcher 2.exe。', 'PCL 下载补丁',
+            [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
+        return
+    }
+    $exe = $txtPath.Text.Trim()
+    if ([string]::IsNullOrWhiteSpace($exe) -or -not (Test-Path -LiteralPath $exe)) {
+        [Windows.Forms.MessageBox]::Show('找不到该文件，请重新选择启动器 exe。', 'PCL 下载补丁',
             [Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
         return
     }
@@ -539,15 +461,37 @@ $btnLaunch.Add_Click({
         $psi.CreateNoWindow = $true
         [Diagnostics.Process]::Start($psi) | Out-Null
     } else {
-        $exe = $txtPath.Text.Trim()
-        if (-not $script:pathPlaceholder -and (Test-Path -LiteralPath $exe)) { Start-Process -FilePath $exe }
+        if (-not $script:pathPlaceholder) {
+            $exe = $txtPath.Text.Trim()
+            if (Test-Path -LiteralPath $exe) { Start-Process -FilePath $exe }
+        }
     }
 })
 
+function Update-Layout {
+    $pad = 32
+    $innerW = $form.ClientSize.Width - $pad * 2
+
+    $card.Width = $innerW
+    $pathBox.Width = $innerW - 26 - 90
+    $btnBrowse.Location = New-Object Drawing.Point(($pathBox.Right + 12), 58)
+    $lnkClean.Location = New-Object Drawing.Point(($lblPristine.Right), 232)
+
+    $outBox.Width = $innerW
+    $outBox.Top = 434
+    $outBox.Height = [Math]::Max(120, $form.ClientSize.Height - 434 - $pad)
+
+    $lblStatus.Location = New-Object Drawing.Point(($innerW + $pad - $lblStatus.Width), 392)
+}
+
 $form.Add_Shown({
+    Update-Layout
     Update-UiState
-    $lblStatus.Location = New-Object Drawing.Point(($form.ClientSize.Width - $lblStatus.Width - 32), 390)
     Add-OutputLine -Text '就绪。选择启动器 exe 后点「开始打补丁」。' -Color $C_Muted
+})
+
+$form.Add_Resize({
+    try { Update-Layout } catch { Write-Verbose ("布局更新失败：" + $_.Exception.Message) }
 })
 
 $form.Add_FormClosing({
