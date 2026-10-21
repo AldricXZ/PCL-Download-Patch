@@ -29,7 +29,9 @@ try {
     # 等待启动器完全关闭（运行中无法替换文件）
     while (Get-Process -Name $launcherName -ErrorAction SilentlyContinue) {
         Start-Sleep -Seconds 2
-        try { $cur = Get-ExeHash } catch { }
+        try { $cur = Get-ExeHash } catch {
+            Write-Verbose ("读取哈希失败（文件可能被短暂锁定）：" + $_.Exception.Message)
+        }
     }
 
     # 关闭后最终判定并修复

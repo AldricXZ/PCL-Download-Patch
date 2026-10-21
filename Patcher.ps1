@@ -89,7 +89,9 @@ foreach ($res in $mod.Resources) {
             }
         }
         $rr.Close()
-    } catch { }
+    } catch {
+        Write-Verbose ("资源解包失败，已跳过：" + $_.Exception.Message)
+    }
 }
 Write-Log ("[依赖] 从启动器内嵌资源提取了 $depCount 个依赖程序集")
 if ($depCount -eq 0) { $resolver.AddSearchDirectory($depsDir) | Out-Null }
@@ -541,7 +543,9 @@ try {
                     $killed++
                 }
             }
-        } catch { }
+        } catch {
+            Write-Verbose ("清理旧守护失败：" + $_.Exception.Message)
+        }
         if ($hadStartup) { Remove-Item $startupVbs -Force -ErrorAction SilentlyContinue }
         if ($killed -gt 0 -or $hadStartup) { Write-Log "已移除之前的常驻守护（已在运行的守护进程随之退出）。" }
         if ($AutoFix -eq 'shell') {
