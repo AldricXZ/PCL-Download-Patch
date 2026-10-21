@@ -16,11 +16,78 @@ namespace PclPatchGui
 {
     public class App : Application
     {
+        /// <summary>引擎目录：%LOCALAPPDATA%\PCLPatchEngine（内嵌资源首次运行时释放）</summary>
+        public static string EngineDir { get; private set; }
+
         [STAThread]
-        public static void Main()
+        public static void Main(string[] args)
         {
+            // 引擎释放：Patcher.ps1 / cecil / 守护 exe 全部内嵌在 exe 资源里，
+            // 首次运行释放到固定目录；目录已存在则跳过（状态文件、原始备份都在里面，不能动）
+            EngineDir = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "PCLPatchEngine");
+            try
+            {
+                EnsureEngine();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("初始化补丁引擎失败：\n" + ex.Message +
+                    "\n\n请确认本程序未被杀毒软件拦截后重试。", "PCL 下载补丁",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            // 命令行：argv[0] 可为拖入的启动器 exe（预填路径）；
+            // argv[1] 为 "none" 时选「不自动修复」并直接开始打补丁（常规版 bat 用）
+            string presetPath = args != null && args.Length > 0 ? args[0] : null;
+            bool autoNone = args != null && args.Length > 1 && args[1] == "none";
+
             var app = new App();
-            app.Run(new MainWindow());
+            var win = new MainWindow(presetPath, autoNone);
+            app.Run(win);
+        }
+
+        static void EnsureEngine()
+        {
+            var asm = System.Reflection.Assembly.GetExecutingAssembly();
+            // 资源名形如 pcl.engine.Patcher.ps1 / pcl.engine.cecil.net40.Mono.Cecil.dll：
+            // 仅 cecil 段的点代表目录分隔（cecil.<子目录>.<文件>），其余保持原样
+            string[] names = asm.GetManifestResourceNames();
+            bool any = false;
+            foreach (string n in names)
+            {
+                if (!n.StartsWith("pcl.engine.")) continue;
+                any = true;
+                string rel = n.Substring("pcl.engine.".Length);
+                if (rel.StartsWith("cecil."))
+                {
+                    // cecil.net40.Mono.Cecil.dll → cecil\net40\Mono.Cecil.dll：
+                    // 只展开子目录段（net40 / netstandard2.0），文件名内的点保持原样
+                    string rest = rel.Substring("cecil.".Length);
+                    foreach (string sub in new string[] { "net40", "netstandard2.0" })
+                    {
+                        if (rest.StartsWith(sub + "."))
+                        {
+                            rel = "cecil\\" + sub + "\\" + rest.Substring(sub.Length + 1);
+                            break;
+                        }
+                    }
+                }
+                string dest = System.IO.Path.Combine(EngineDir, rel);
+                string dir = System.IO.Path.GetDirectoryName(dest);
+                if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);
+                if (System.IO.File.Exists(dest)) continue;   // 已存在不覆盖（保留状态与旧版一致性）
+                using (var src = asm.GetManifestResourceStream(n))
+                using (var dst = new System.IO.FileStream(dest, System.IO.FileMode.Create))
+                {
+                    src.CopyTo(dst);
+                }
+            }
+            if (!any) throw new InvalidOperationException("内嵌引擎资源缺失（exe 损坏？）");
+            if (!System.IO.File.Exists(System.IO.Path.Combine(EngineDir, "Patcher.ps1")))
+                throw new InvalidOperationException("引擎核心 Patcher.ps1 释放失败");
         }
     }
 
@@ -58,7 +125,7 @@ namespace PclPatchGui
         // 然后把输出写进固定路径的 gui-out.log 供 exe 轮询显示。
         string Here()
         {
-            return AppContext.BaseDirectory.TrimEnd('\\');
+            return App.EngineDir;
         }
 
         static System.Windows.Media.SolidColorBrush B(string hex)
@@ -96,8 +163,14 @@ namespace PclPatchGui
             return System.IO.Path.Combine(Here(), "Patcher.ps1");
         }
 
-        public MainWindow()
+        readonly string _presetPath;
+        readonly bool _autoNone;
+
+        public MainWindow(string presetPath, bool autoNone)
         {
+            _presetPath = presetPath;
+            _autoNone = autoNone;
+
             // 窗口/任务栏图标：exe 内嵌的 app.ico 资源提取
             try
             {
@@ -351,6 +424,13 @@ namespace PclPatchGui
             Loaded += delegate
             {
                 AppendLog("就绪。选择启动器 exe 后点「开始打补丁」。", CMuted);
+                // 命令行预填（bat 拖入路径），常规版 bat 再自动开打
+                if (!string.IsNullOrEmpty(_presetPath)) SetExePath(_presetPath);
+                if (_autoNone)
+                {
+                    if (_radios.Count > 2) _radios[2].SetChecked(true);
+                    if (HasValidPath()) DoPatch();
+                }
                 RefreshState();
             };
         }
@@ -499,7 +579,7 @@ namespace PclPatchGui
         void BuildRadioRows()
         {
             _radios.Add(new RadioRow("常驻守护（推荐）", "开机自启后台，打开启动器时检测、关闭后自动修复", true));
-            _radios.Add(new RadioRow("启动壳检测", "无后台；日常用「启动PCL.exe」打开启动器", false));
+            _radios.Add(new RadioRow("启动壳检测", "无后台；日常用「启动PCL」按钮打开启动器", false));
             _radios.Add(new RadioRow("不自动修复", "更新后把新 exe 再拖一次", false));
 
             for (int i = 0; i < _radios.Count; i++)

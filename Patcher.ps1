@@ -262,7 +262,7 @@ if ([string]::IsNullOrEmpty($ExePath)) {
     Write-Log "      「拖我上去_常规版.bat」只打补丁，不安装任何自动修复。"
     Write-Log "      建议打补丁前先手动备份：复制一份 exe 改名保存，出问题复制回来即可还原。"
     Write-Log "      菜单可选更新后的自动修复方式："
-    Write-Log "        1) 启动壳检测 —— 用补丁包里的「启动PCL.exe」启动启动器，启动前自动修复（无后台）"
+    Write-Log "        1) 启动壳检测 —— 无后台；日常用图形界面的「启动PCL」按钮打开启动器，启动前自动修复"
     Write-Log "        2) 常驻守护（推荐）—— 开机自启后台守护，打开启动器时检测，关闭后自动修复"
     Write-Log ""
     Write-Log "谁需要打补丁（补丁器也会自动判断）："
@@ -828,8 +828,7 @@ try {
         if ($killed -gt 0 -or $hadStartup) { Write-Log "已移除之前的常驻守护（已在运行的守护进程随之退出）。" }
         if ($AutoFix -eq 'shell') {
             Write-Log "已切换为启动壳检测（无后台常驻）："
-            Write-Log "  - 以后请用本补丁包里的「启动PCL.exe」打开启动器：启动前会自动检测更新并修复。"
-            Write-Log "  - 也可以右键「启动PCL.exe」发送到桌面，代替原快捷方式。"
+            Write-Log "  - 日常请用图形界面的「启动PCL」按钮打开启动器：启动前会自动检测更新并修复。"
         } else {
             Write-Log "未安装任何自动修复：以后启动器更新后，把新 exe 再拖到「拖我上去.bat」或「拖我上去_常规版.bat」打一次即可。"
         }
