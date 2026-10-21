@@ -28,7 +28,7 @@ if ([string]::IsNullOrEmpty($ExePath)) {
     Write-Log "  - 旧版正式版（如 2.13.1.1）：没有限制，直接用，无需补丁。"
     Write-Log ""
     Write-Log "补丁只修改启动器文件本身，不动 .minecraft、设置和存档。"
-    Write-Log "是否生成备份、采用哪种自动修复方式，都由拖放后的菜单选择；补丁失败时原文件不会被改动。"
+    Write-Log "补丁失败时原文件不会被改动。"
     exit 0
 }
 
