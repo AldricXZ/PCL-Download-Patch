@@ -5,7 +5,9 @@ param(
     [string]$PatchSet = 'ABCD',
     [string]$AutoFix = 'watch',
     [switch]$Uninstall,
-    [switch]$Status
+    [switch]$Status,
+    [switch]$CleanPristine,
+    [switch]$LaunchShell
 )
 $ErrorActionPreference = 'Stop'
 $script:here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -83,6 +85,48 @@ if ($Status) {
         Version           = '1.0.5'
     }
     $obj | ConvertTo-Json -Compress
+    exit 0
+}
+
+# ---------- 清理原始备份模式（GUI「清理原始备份」按钮调用） ----------
+if ($CleanPristine) {
+    Write-Log "==== PCL 下载功能补丁 · 清理原始备份 ===="
+    if ((Get-PristineState) -ne 'available') {
+        Write-Log "[提示] 原始备份不存在，无需清理。"
+        exit 0
+    }
+    Remove-Item -LiteralPath $pristineDir -Recurse -Force -ErrorAction Stop
+    Write-Log "已清理原始备份目录：$pristineDir"
+    Write-Log "注意：「卸载补丁」功能自此不可用，只能从官方重新下载启动器覆盖。"
+    exit 0
+}
+
+# ---------- 启动壳模式（GUI「启动PCL」按钮调用：先检测修复再启动） ----------
+if ($LaunchShell) {
+    $pathFile = Join-Path $here 'wrapper-path.txt'
+    if (Test-Path -LiteralPath $pathFile) {
+        $ExePath = (Get-Content -LiteralPath $pathFile -TotalCount 1 -Encoding Unicode).Trim()
+    }
+    if ([string]::IsNullOrEmpty($ExePath) -or -not (Test-Path -LiteralPath $ExePath)) {
+        Write-Output "[失败] 未记录启动器路径，请先打一次补丁。"
+        exit 1
+    }
+    # 检测更新并修复（与 Watch-Shell.ps1 相同逻辑，但同步执行以便 GUI 显示进度）
+    $hashFile = Join-Path $here '.lastpatched.sha256'
+    $last = ''
+    if (Test-Path -LiteralPath $hashFile) {
+        $last = (Get-Content -LiteralPath $hashFile -TotalCount 1 -Encoding ascii).Trim()
+    }
+    $cur = (Get-FileHash -Algorithm SHA256 -LiteralPath $ExePath).Hash
+    if ($last -and ($cur -ine $last)) {
+        Write-Output "检测到启动器已更新，正在自动重打补丁……"
+        $patchArgs = @('-ExePath', $ExePath, '-AutoFix', 'shell')
+        & $PSCommandPath @patchArgs | ForEach-Object { Write-Output $_ }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Output "自动补丁失败，仍将启动原版启动器。"
+        }
+    }
+    Start-Process -FilePath $ExePath -WorkingDirectory (Split-Path -Parent $ExePath)
     exit 0
 }
 
