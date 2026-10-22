@@ -393,7 +393,7 @@ namespace PclPatchGui
                 MinHeight = 190
             };
             _logPanel = new StackPanel();
-            _logScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = _logPanel };
+            _logScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _logPanel };
             logBorder.Child = _logScroll;
             root.Children.Add(logBorder);
             Grid.SetRow(logBorder, 3);
@@ -668,7 +668,7 @@ namespace PclPatchGui
                 FontFamily = new FontFamily("Consolas"),
                 FontSize = 12.5,
                 Margin = new Thickness(0, 0, 0, 5),
-                TextWrapping = TextWrapping.Wrap
+                TextWrapping = TextWrapping.NoWrap
             };
             _logPanel.Children.Add(tb);
             _logScroll.UpdateLayout();
