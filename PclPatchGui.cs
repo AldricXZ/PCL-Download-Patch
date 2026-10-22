@@ -392,7 +392,9 @@ namespace PclPatchGui
                 Padding = new Thickness(18, 14, 18, 14),
                 MinHeight = 190
             };
-            _logPanel = new StackPanel();
+            // 底部留 24px 余量：CJK 回退字体的字形会比 Consolas 的测量行高更高，
+            // 最后一行在滚动到底时可能溢出内容总高被裁掉，这段余量把它吸收掉
+            _logPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 24) };
             _logScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _logPanel };
             logBorder.Child = _logScroll;
             root.Children.Add(logBorder);
