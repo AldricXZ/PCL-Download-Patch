@@ -118,6 +118,7 @@ namespace PclPatchGui
         StackPanel _radioHost;
         StackPanel _logPanel;
         ScrollViewer _logScroll;
+        double _logLineHeight;   // 单行渲染高度（含下边距），滚轮整行对齐用
         Button _btnPatch;
         Button _btnLaunch;
         Button _btnUninstall;
@@ -396,6 +397,18 @@ namespace PclPatchGui
             // 最后一行在滚动到底时可能溢出内容总高被裁掉，这段余量把它吸收掉
             _logPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 24) };
             _logScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, Content = _logPanel };
+            // 滚轮按整行对齐滚动：滚轮一格固定 48px、行高约 27px，直接滚必然把行
+            // 切成上下半截；截获滚轮事件改为按行高整数倍滚动并对齐行边界
+            _logScroll.PreviewMouseWheel += delegate(object s, MouseWheelEventArgs e)
+            {
+                e.Handled = true;
+                double line = _logLineHeight > 0 ? _logLineHeight : 24;
+                double linesPerNotch = SystemParameters.WheelScrollLines > 0 ? SystemParameters.WheelScrollLines : 3;
+                double target = _logScroll.VerticalOffset + Math.Sign(-e.Delta) * linesPerNotch * line;
+                target = Math.Round(target / line) * line;   // 对齐整行，行永远完整显示
+                double max = Math.Max(0, _logScroll.ExtentHeight - _logScroll.ViewportHeight);
+                _logScroll.ScrollToVerticalOffset(Math.Min(Math.Max(target, 0), max));
+            };
             logBorder.Child = _logScroll;
             root.Children.Add(logBorder);
             Grid.SetRow(logBorder, 3);
@@ -674,6 +687,11 @@ namespace PclPatchGui
             };
             _logPanel.Children.Add(tb);
             _logScroll.UpdateLayout();
+            if (_logLineHeight <= 0 && tb.ActualHeight > 0)
+            {
+                // 用实际渲染行高（含下边距）作为整行滚动单位
+                _logLineHeight = tb.ActualHeight + tb.Margin.Bottom;
+            }
             _logScroll.ScrollToEnd();
         }
 
