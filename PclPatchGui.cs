@@ -23,7 +23,7 @@ namespace PclPatchGui
         public static void Main(string[] args)
         {
             // 引擎释放：Patcher.ps1 / cecil / 守护 exe 全部内嵌在 exe 资源里，
-            // 首次运行释放到固定目录；目录已存在则跳过（状态文件、原始备份都在里面，不能动）
+            // 每次启动按内嵌版本覆盖到固定目录（状态文件、原始备份不在资源清单里，不受影响）
             EngineDir = System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "PCLPatchEngine");
@@ -78,12 +78,16 @@ namespace PclPatchGui
                 string dest = System.IO.Path.Combine(EngineDir, rel);
                 string dir = System.IO.Path.GetDirectoryName(dest);
                 if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);
-                if (System.IO.File.Exists(dest)) continue;   // 已存在不覆盖（保留状态与旧版一致性）
-                using (var src = asm.GetManifestResourceStream(n))
-                using (var dst = new System.IO.FileStream(dest, System.IO.FileMode.Create))
+                try
                 {
-                    src.CopyTo(dst);
+                    using (var src = asm.GetManifestResourceStream(n))
+                    using (var dst = new System.IO.FileStream(dest, System.IO.FileMode.Create))
+                    {
+                        src.CopyTo(dst);
+                    }
                 }
+                catch (System.IO.IOException) { }               // 文件被占用（如守护 exe 正在运行）：跳过，下次启动再更新
+                catch (System.UnauthorizedAccessException) { }
             }
             if (!any) throw new InvalidOperationException("内嵌引擎资源缺失（exe 损坏？）");
             if (!System.IO.File.Exists(System.IO.Path.Combine(EngineDir, "Patcher.ps1")))
