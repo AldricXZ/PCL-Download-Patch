@@ -258,8 +258,8 @@ if ([string]::IsNullOrEmpty($ExePath)) {
     Write-Log "==== PCL 下载功能补丁 ===="
     Write-Log "补丁作者：沐序  https://github.com/AldricXZ/PCL-Download-Patch"
     Write-Log ""
-    Write-Log "用法：把启动器的 Plain Craft Launcher 2.exe 拖到「拖我上去.bat」图标上松手，按菜单选择即可。"
-    Write-Log "      「拖我上去_常规版.bat」只打补丁，不安装任何自动修复。"
+    Write-Log "用法：双击「PCL补丁界面.exe」，把启动器的 Plain Craft Launcher 2.exe 拖进窗口，选择方式后点「开始打补丁」。"
+    Write-Log "      选「不自动修复」则只打补丁，不安装任何自动修复。"
     Write-Log "      建议打补丁前先手动备份：复制一份 exe 改名保存，出问题复制回来即可还原。"
     Write-Log "      菜单可选更新后的自动修复方式："
     Write-Log "        1) 启动壳检测 —— 无后台；日常用图形界面的「启动PCL」按钮打开启动器，启动前自动修复"
@@ -830,7 +830,7 @@ try {
             Write-Log "已切换为启动壳检测（无后台常驻）："
             Write-Log "  - 日常请用图形界面的「启动PCL」按钮打开启动器：启动前会自动检测更新并修复。"
         } else {
-            Write-Log "未安装任何自动修复：以后启动器更新后，把新 exe 再拖到「拖我上去.bat」或「拖我上去_常规版.bat」打一次即可。"
+            Write-Log "未安装任何自动修复：以后启动器更新后，重新打开「PCL补丁界面.exe」，把新 exe 拖进窗口重打一次即可。"
         }
     }
 } catch {

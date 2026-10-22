@@ -664,9 +664,10 @@ namespace PclPatchGui
                 FontFamily = new FontFamily("Consolas"),
                 FontSize = 12.5,
                 Margin = new Thickness(0, 0, 0, 5),
-                TextWrapping = TextWrapping.NoWrap
+                TextWrapping = TextWrapping.Wrap
             };
             _logPanel.Children.Add(tb);
+            _logScroll.UpdateLayout();
             _logScroll.ScrollToEnd();
         }
 
